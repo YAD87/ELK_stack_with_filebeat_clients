@@ -1,2 +1,2 @@
 # ELK_stack_with_filebeat_clients
-Automating deployment ELK stack with Filebeats on clients for log
+Automating deployment ELK stack with Filebeats on clients for log using Ansible and Vagrant
