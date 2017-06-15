@@ -1,0 +1,37 @@
+---
+
+- name: Install on client
+  hosts: client
+  gather_facts: false
+  sudo: yes
+  tasks:
+
+    - name: crate folder certs
+      shell: mkdir -p /etc/pki/tls/certs
+ 
+    - name: copy certificate
+      copy: src=/home/denis/vp/elk/templates/logstash-forwarder.crt.j2/34.211.30.70/etc/pki/tls/certs/logstash-forwarder.crt  dest=/etc/pki/tls/certs/logstash-forwarder.crt
+
+    - name: install filebeat
+      shell: echo "deb https://packages.elastic.co/beats/apt stable main" |  tee -a /etc/apt/sources.list.d/beats.list
+   
+    - name: gpg key
+      shell: wget -qO - https://packages.elastic.co/GPG-KEY-elasticsearch |  apt-key add -
+
+    - name: update
+      apt:
+        update_cache: yes
+
+    - name: Install the package filebeat
+      apt:
+        name: filebeat
+        state: present
+
+    - name: Configure filebeat
+      template: src=templates/filebeat.yml.j2 dest=/etc/filebeat/filebeat.yml
+   
+    - name: filebeat as service
+      shell: update-rc.d filebeat defaults 95 10
+
+    - name: restart filebeat
+      shell: service filebeat restart

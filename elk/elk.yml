@@ -1,0 +1,180 @@
+---
+
+- name: Install elk stack
+  hosts: elk
+  gather_facts: false
+  sudo: yes
+
+  tasks:
+
+    - name: add java repo        
+      shell: add-apt-repository -y ppa:webupd8team/java
+
+    - name: Update repo
+      apt:
+       update_cache: yes
+
+    - name: Accept Java 8 License
+      become: yes
+      debconf: name='oracle-java8-installer' question='shared/accepted-oracle-license-v1-1' value='true' vtype='select'
+ 
+    
+    - name: Install the package java
+      apt:
+        name: oracle-java8-installer
+        state: present
+
+
+    - name: Elasticsherach  install
+      shell: wget -qO - https://packages.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+
+    - name: Add elastic source list
+      shell: echo "deb http://packages.elastic.co/elasticsearch/2.x/debian stable main" | sudo tee -a /etc/apt/sources.list.d/elasticsearch-2.x.list
+
+    - name: Update repo                                              
+      apt:
+         update_cache: yes
+
+
+    - name: Install  elastic
+      apt:
+        name: elasticsearch
+        state: present
+
+
+    - lineinfile:
+        path: /etc/elasticsearch/elasticsearch.yml
+        regexp: '^network.host:'
+        line: 'network.host: localhost'
+
+    - service:
+        name: elasticsearch
+        state: restarted
+
+    - name: set to boot upelastic
+      shell: update-rc.d elasticsearch defaults 95 10
+
+    - name: create source list kibana
+      shell: echo "deb http://packages.elastic.co/kibana/4.4/debian stable main" | sudo tee -a /etc/apt/sources.list.d/kibana-4.4.x.list
+
+    - name: Update repo
+      apt:
+         update_cache: yes
+
+    - name: Install  kibana
+      apt:
+        name: kibana
+        state: present
+
+    - lineinfile:
+        path: /opt/kibana/config/kibana.yml
+        regexp: '^server.host:'
+        line: 'server.host: localhost'
+
+    - name: setup kibana as service
+      shell: update-rc.d kibana defaults 96 9
+
+    - service:
+        name: kibana
+        state: started
+
+    - name: Install list of packages
+      apt: name={{item}} state=installed
+      with_items:
+          - nginx
+          - apache2-utils
+          - python-passlib
+
+    ##password for kibana inter
+
+   # - name: install passlib
+     # shell: pip install passlib
+
+    - htpasswd:
+        path: /etc/nginx/htpasswd.users
+        name: admin
+        password: admin
+
+
+    - name: remove default nginx conf
+      file: path=/etc/nginx/sites-enabled/default state=absent
+
+    - name: create nginx template
+      template: src=templates/nginx.j2 dest=/etc/nginx/sites-available/nginx
+
+    - name: Enable new configure
+      file: src=/etc/nginx/sites-available/nginx dest=/etc/nginx/sites-enabled/nginx state=link
+
+    - service:
+        name: nginx
+        state: restarted
+
+    - name: add logstash sourc list
+      shell: echo 'deb http://packages.elastic.co/logstash/2.2/debian stable main' | sudo tee /etc/apt/sources.list.d/logstash-2.2.x.list
+
+    - name: Update repo
+      apt:
+         update_cache: yes
+
+    - name: Install  logstash
+      apt:
+        name: logstash
+        state: present
+
+    - name: create ssl folder
+      shell: mkdir -p /etc/pki/tls/certs && mkdir /etc/pki/tls/private
+
+    - name: change openssl
+      shell: cd /etc/ssl/ && rm openssl.cnf
+  
+    - name: new openssl
+      template: src=templates/openssl.cnf.j2 dest=/etc/ssl/openssl.cnf
+        
+     
+
+    - name: genereate certif
+      shell: openssl req -config /etc/ssl/openssl.cnf -x509  -batch -nodes -newkey rsa:2048 -keyout /etc/pki/tls/private/logstash-forwarder.key -out /etc/pki/tls/certs/logstash-forwarder.crt -subj /CN={{ server_name }}
+    
+    - fetch:
+        src: /etc/pki/tls/certs/logstash-forwarder.crt
+        dest: /home/denis/vp/elk/templates/logstash-forwarder.crt.j2
+
+    - name: Configure logstash input
+      template: src=templates/input.conf.j2 dest=/etc/logstash/conf.d/02-beats-input.conf
+  
+    - name: logstash filter
+      template: src=templates/filter.conf.j2 dest=/etc/logstash/conf.d/10-syslog-filter.conf
+
+    - name: logstash output
+      template: src=templates/output.conf.j2 dest=/etc/logstash/conf.d/30-elasticsearch-output.conf
+
+    - service:
+        name: logstash
+        state: restarted
+
+    - name: logstash as service
+      shell: update-rc.d logstash defaults 96 9 
+
+    - name: load kibana dashboards
+      get_url:
+          url:  https://download.elastic.co/beats/dashboards/beats-dashboards-1.1.0.zip
+          dest: /home/ubuntu
+
+    - name: install unzip
+      shell: apt-get -y install unzip
+
+    - name: unzip dashboards
+      shell:  unzip beats-dashboards-1.1.0.zip
+
+    - name: install dashbroad
+      shell: cd /home/ubuntu/beats-dashboards-* && ./load.sh
+
+    - name: filebeat index template
+      shell: cd ~ && curl -O https://gist.githubusercontent.com/thisismitch/3429023e8438cc25b86c/raw/d8c479e2a1adcea8b1fe86570e42abab0f10f364/filebeat-index-template.json
+
+    - name: load templ
+      shell: curl -XPUT 'http://localhost:9200/_template/filebeat?pretty' -d@filebeat-index-template.json
+
+
+    
+    
